@@ -6,7 +6,7 @@ import (
 	"rickybobby/parser"
 	"rickybobby/producer"
 	"time"
-
+	"github.com/linkedin/goavro"
 	"github.com/pkg/profile"
 	"github.com/spf13/viper"
 	"gopkg.in/urfave/cli.v1"
@@ -77,7 +77,22 @@ func pcapCommand(c *cli.Context) error {
 		if err != nil {
 			log.Fatalf("Failed to open output file: %v", err)
 		}
-		parser.OutputStream = outfile
+		if parser.Format == "avro" {
+			codec, err := producer.NewAvroCodec()
+			if err != nil {
+				log.Fatalf("Failed to create avro codec: %v", err)
+			}
+			ocfw, err := goavro.NewOCFWriter(goavro.OCFConfig{
+				W:	   outfile,
+				Codec: codec,
+			})
+			if err != nil {
+				log.Fatalf("Failed to create OCF writer: %v", err)
+			}
+			parser.OCFWriter = ocfw
+		} else {
+			parser.OutputStream = outfile
+		}
 		defer func() {
 			if err := outfile.Close(); err != nil {
 				log.Fatalf("Failed to close output file: %v", err)

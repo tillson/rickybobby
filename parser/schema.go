@@ -7,6 +7,7 @@ import (
 	"rickybobby/producer"
 	"strings"
 	"os"
+	"github.com/linkedin/goavro"
 	"github.com/Shopify/sarama"
 	"github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
@@ -17,6 +18,7 @@ var (
 	OutputType = ""
 	OutputFile = ""
 	OutputStream *os.File
+	OCFWriter *goavro.OCFWriter
 )
 
 // JSON serialization only supports nullifying types that can accept nil.
@@ -104,9 +106,11 @@ func FormatOutputExport(schema *DnsSchema) {
 		} else if OutputType == "stdout" {
 			fmt.Printf("%s\n", confluentMessage)
 		} else if OutputType == "file" {
-			_, err := OutputStream.Write(binary)
+			var values []map[string]interface{}
+			values = append(values, DNSToAvroMap(schema))
+			err := OCFWriter.Append(values)
 			if err != nil {
-				log.Fatalf("Failed to output JSON to a file: %v", err)
+				log.Fatalf("Failed to output AVRO to a file: %v", err)
 			}
 		}
 	} else if Format == "json" {
