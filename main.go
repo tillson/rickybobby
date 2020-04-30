@@ -5,7 +5,9 @@ import (
 	"os"
 	"rickybobby/parser"
 	"rickybobby/producer"
+	"sync"
 	"time"
+
 	"github.com/linkedin/goavro"
 	"github.com/pkg/profile"
 	"github.com/spf13/viper"
@@ -71,8 +73,10 @@ func pcapCommand(c *cli.Context) error {
 		producer.Producer = producer.NewProducer()
 	} else if parser.OutputType == "file" {
 		if !c.GlobalIsSet("output-file") {
-			return cli.NewExitError("ERROR: must provide output-file argument when using file output", 1)	
+			return cli.NewExitError("ERROR: must provide output-file argument when using file output", 1)
 		}
+		parser.WriteChannel = make(chan *parser.DnsSchema)
+		parser.WriteWaitGroup = &sync.WaitGroup{}
 		outfile, err := os.Create(parser.OutputFile)
 		if err != nil {
 			log.Fatalf("Failed to open output file: %v", err)
@@ -83,7 +87,7 @@ func pcapCommand(c *cli.Context) error {
 				log.Fatalf("Failed to create avro codec: %v", err)
 			}
 			ocfw, err := goavro.NewOCFWriter(goavro.OCFConfig{
-				W:	   outfile,
+				W:     outfile,
 				Codec: codec,
 			})
 			if err != nil {
@@ -93,7 +97,9 @@ func pcapCommand(c *cli.Context) error {
 		} else {
 			parser.OutputStream = outfile
 		}
+		go parser.ConsumeAvro()
 		defer func() {
+			parser.WriteWaitGroup.Wait()
 			if err := outfile.Close(); err != nil {
 				log.Fatalf("Failed to close output file: %v", err)
 			}
@@ -118,9 +124,6 @@ func liveCommand(c *cli.Context) error {
 	loadGlobalOptions(c)
 
 	if parser.Config != "" {
-		viper.SetDefault("KafkaSASL", true)
-		viper.SetDefault("KafkaSASLUsername", "user")
-		viper.SetDefault("KafkaSASLPassword", "thisisabadpassword")
 		viper.SetConfigFile(parser.Config)
 		viper.ReadInConfig()
 	}
