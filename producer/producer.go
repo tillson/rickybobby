@@ -9,13 +9,13 @@ import (
 )
 
 var (
-	SASLUsername = ""
-	SASLPassword = ""
-	Topic        = ""
-	MessageKey   = ""
+	SASLUsername  = ""
+	SASLPassword  = ""
+	Topic         = ""
+	MessageKey    = ""
 	SchemaVersion = 1
-	Brokers      []string
-	Producer     sarama.AsyncProducer = nil
+	Brokers       []string
+	Producer      sarama.AsyncProducer = nil
 )
 
 func NewProducer() sarama.AsyncProducer {

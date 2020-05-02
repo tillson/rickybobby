@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/Shopify/sarama"
+	"github.com/leboncoin/structs"
 	"github.com/linkedin/goavro"
 	"github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
@@ -151,57 +152,8 @@ func FormatOutputExport(schema *DnsSchema) {
 	}
 }
 
-func DNSToAvroMap(schema *DnsSchema) map[string]interface{} {
-	avroMap := map[string]interface{}{
-		"timestamp":         schema.Timestamp,
-		"ip_src":            schema.Source,
-		"ip_dst":            schema.DestinationAddress,
-		"dst_port":          int32(schema.DestinationPort),
-		"txid":              int32(schema.Id),
-		"rcode":             schema.Rcode,
-		"qtype":             int32(schema.Qtype),
-		"qname":             schema.Qname,
-		"recursion_desired": schema.RecursionDesired,
-		"response":          schema.Response,
-		"answer":            map[string]interface{}{"boolean": schema.Answer},
-		"authority":         map[string]interface{}{"boolean": schema.Authority},
-		"additional":        map[string]interface{}{"boolean": schema.Additional},
-		"source":            schema.Source,
-	}
-	if schema.Rname != nil {
-		avroMap["rname"] = map[string]interface{}{"string": *schema.Rname}
-	}
-	if schema.Rtype != nil {
-		avroMap["rtype"] = map[string]interface{}{"int": int32(*schema.Rtype)}
-	}
-	if schema.Rdata != nil {
-		avroMap["rdata"] = map[string]interface{}{"string": *schema.Rdata}
-	}
-	if schema.Ttl != nil {
-		avroMap["ttl"] = map[string]interface{}{"long": int64(*schema.Ttl)}
-	}
-	if schema.EcsClient != nil {
-		avroMap["ecs_client"] = map[string]interface{}{"string": *schema.EcsClient}
-	}
-	if schema.EcsSource != nil {
-		avroMap["ecs_source"] = map[string]interface{}{"string": string(*schema.EcsSource)}
-	}
-	if schema.EcsScope != nil {
-		avroMap["ecs_scope"] = map[string]interface{}{"string": string(*schema.EcsScope)}
-	}
-	if schema.Source != "" {
-		avroMap["sensor"] = map[string]interface{}{"string": schema.Sensor}
-	}
-
-	if schema.Ipv4 {
-		avroMap["ip_version"] = 4
-	} else {
-		avroMap["ip_version"] = 6
-	}
-	return avroMap
-}
-
-// ConsumeAvro consumes avro parsed DNS schema from WriteChannel and writes it to its right place.
+// ConsumeAvro consumes DNSSchema from WriteChannel, turns it into an avro buffer, and
+// writes it to its right place.
 func ConsumeAvro() {
 	var schemaIdentifier uint32 = 3
 	var schemaIdentifierBuffer []byte = make([]byte, 4)
@@ -213,7 +165,6 @@ func ConsumeAvro() {
 	schemaVersion := producer.SchemaVersion
 	var confluentAvroHeader []byte = make([]byte, schemaVersion)
 
-	var values []map[string]interface{}
 	for schema := range WriteChannel {
 		avroMap := DNSToAvroMap(schema)
 		if OutputType == "kafka" {
@@ -230,14 +181,93 @@ func ConsumeAvro() {
 		} else if OutputType == "stdout" {
 			fmt.Printf("%s\n", avroMap)
 		} else if OutputType == "file" {
+			var values []map[string]interface{}
 			values = append(values, avroMap)
+			err = OCFWriter.Append(values)
+			if err != nil {
+				log.Fatalf("Error writing values to file: %v", err)
+			}
 			if err != nil {
 				log.Fatalf("Failed to output AVRO to a file: %v", err)
 			}
 		}
 	}
-	err = OCFWriter.Append(values)
-	if err != nil {
-		log.Fatalf("Error writing values to file: %v", err)
+}
+
+type AvroDnsSchema struct {
+	Timestamp          int64                  `structs:"timestamp"`
+	Udp                bool                   `structs:"udp"`
+	IpVersion          int                    `structs:"ip_version"`
+	SourceAddress      string                 `structs:"ip_src"`
+	DestinationAddress string                 `structs:"ip_dst"`
+	DestinationPort    int                    `structs:"dst_port"`
+	Id                 int                    `structs:"txid"`
+	Rcode              int                    `structs:"rcode"`
+	Truncated          bool                   `structs:"truncated"`
+	Response           bool                   `structs:"response"`
+	RecursionDesired   bool                   `structs:"recursion_desired"`
+	Answer             map[string]interface{} `structs:"answer"`
+	Authority          map[string]interface{} `structs:"authority"`
+	Additional         map[string]interface{} `structs:"additional"`
+	Qname              string                 `structs:"qname"`
+	Qtype              int                    `structs:"qtype"`
+	Ttl                map[string]interface{} `structs:"ttl,omitempty"`
+	Rname              map[string]interface{} `structs:"rname,omitempty"`
+	Rtype              map[string]interface{} `structs:"rtype,omitempty"`
+	Rdata              map[string]interface{} `structs:"rdata,omitempty"`
+	EcsClient          map[string]interface{} `structs:"ecs_client,omitempty"`
+	EcsSource          map[string]interface{} `structs:"ecs_source,omitempty"`
+	EcsScope           map[string]interface{} `structs:"ecs_scope,omitempty"`
+	Source             string                 `structs:"source"`
+	Sensor             map[string]interface{} `structs:"sensor,omitempty"`
+}
+
+func DNSToAvroMap(schema *DnsSchema) map[string]interface{} {
+	avroMap := AvroDnsSchema{
+		Timestamp:          schema.Timestamp,
+		SourceAddress:      schema.SourceAddress,
+		DestinationAddress: schema.DestinationAddress,
+		DestinationPort:    int(schema.DestinationPort),
+		Id:                 int(schema.Id),
+		Rcode:              schema.Rcode,
+		Qtype:              int(schema.Qtype),
+		Qname:              schema.Qname,
+		RecursionDesired:   schema.RecursionDesired,
+		Response:           schema.Response,
+		Answer:             map[string]interface{}{"boolean": schema.Answer},
+		Authority:          map[string]interface{}{"boolean": schema.Authority},
+		Additional:         map[string]interface{}{"boolean": schema.Additional},
+		Source:             schema.Source,
 	}
+	if schema.Rname != nil {
+		avroMap.Rname = map[string]interface{}{"string": *schema.Rname}
+	}
+	if schema.Rtype != nil {
+		avroMap.Rtype = map[string]interface{}{"int": int32(*schema.Rtype)}
+	}
+	if schema.Rdata != nil {
+		avroMap.Rdata = map[string]interface{}{"string": *schema.Rdata}
+	}
+	if schema.Ttl != nil {
+		avroMap.Ttl = map[string]interface{}{"long": int64(*schema.Ttl)}
+	}
+	if schema.EcsClient != nil {
+		avroMap.EcsClient = map[string]interface{}{"string": *schema.EcsClient}
+	}
+	if schema.EcsSource != nil {
+		avroMap.EcsSource = map[string]interface{}{"string": string(*schema.EcsSource)}
+	}
+	if schema.EcsScope != nil {
+		avroMap.EcsScope = map[string]interface{}{"string": string(*schema.EcsScope)}
+	}
+	if schema.Source != "" {
+		avroMap.Sensor = map[string]interface{}{"string": schema.Sensor}
+	}
+
+	if schema.Ipv4 {
+		avroMap.IpVersion = 4
+	} else {
+		avroMap.IpVersion = 6
+	}
+	return structs.Map(avroMap)
 }

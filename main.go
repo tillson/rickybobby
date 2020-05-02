@@ -87,8 +87,9 @@ func pcapCommand(c *cli.Context) error {
 				log.Fatalf("Failed to create avro codec: %v", err)
 			}
 			ocfw, err := goavro.NewOCFWriter(goavro.OCFConfig{
-				W:     outfile,
-				Codec: codec,
+				W:               outfile,
+				Codec:           codec,
+				CompressionName: "null",
 			})
 			if err != nil {
 				log.Fatalf("Failed to create OCF writer: %v", err)
