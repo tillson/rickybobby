@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	_ "net/http/pprof"
 	"os"
 	"rickybobby/parser"
 	"rickybobby/producer"
@@ -33,6 +34,10 @@ func loadGlobalOptions(c *cli.Context) {
 }
 
 func pcapCommand(c *cli.Context) error {
+
+	// go func() {
+	// 	log.Println(http.ListenAndServe("localhost:6060", nil))
+	// }()
 
 	if c.NArg() < 1 {
 		return cli.NewExitError("ERROR: must provide at least one filename", 1)
@@ -75,7 +80,7 @@ func pcapCommand(c *cli.Context) error {
 		if !c.GlobalIsSet("output-file") {
 			return cli.NewExitError("ERROR: must provide output-file argument when using file output", 1)
 		}
-		parser.WriteChannel = make(chan *parser.DnsSchema)
+		parser.MapWriteChannel = make(chan map[string]interface{})
 		parser.WriteWaitGroup = &sync.WaitGroup{}
 		outfile, err := os.Create(parser.OutputFile)
 		if err != nil {
@@ -98,7 +103,7 @@ func pcapCommand(c *cli.Context) error {
 		} else {
 			parser.OutputStream = outfile
 		}
-		go parser.ConsumeAvro()
+		go parser.WriteMapOutput()
 		defer func() {
 			parser.WriteWaitGroup.Wait()
 			if err := outfile.Close(); err != nil {
@@ -106,7 +111,6 @@ func pcapCommand(c *cli.Context) error {
 			}
 		}()
 	}
-
 	for _, f := range c.Args() {
 		parser.ParseFile(f)
 	}

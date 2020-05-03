@@ -78,21 +78,22 @@ var (
 func ParseDns(handle *pcap.Handle) {
 
 	var (
-		schema DnsSchema
-		stats  Statistics
+		stats Statistics
 	)
 
 	// Set the source and sensor for packet source
-	schema.Sensor = Sensor
-	schema.Source = Source
 
 	// Use the handle as a packet source to process all packets
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	packetSource.NoCopy = true
+	// schema := DnsSchema{}
 
 	for packet := range packetSource.Packets() {
-		stats.PacketTotal += 1
-		AnalyzePacket(packet, &schema, &stats)
+		schema := dnsSchemaPool.Get().(*DnsSchema)
+		schema.Sensor = Sensor
+		schema.Source = Source
+		stats.PacketTotal++
+		AnalyzePacket(packet, schema, &stats)
 	}
 
 	log.Infof("Number of TOTAL packets: %v", stats.PacketTotal)
@@ -115,16 +116,16 @@ func AnalyzePacket(packet gopacket.Packet, schema *DnsSchema, stats *Statistics)
 			schema.SourceAddress = ip4.SrcIP.String()
 			schema.DestinationAddress = ip4.DstIP.String()
 			schema.Ipv4 = true
-			stats.PacketIPv4 += 1
+			stats.PacketIPv4++
 		case layers.LayerTypeIPv6:
 			ip6 = curLayer.(*layers.IPv6)
 			schema.SourceAddress = ip6.SrcIP.String()
 			schema.DestinationAddress = ip6.DstIP.String()
 			schema.Ipv4 = false
-			stats.PacketIPv6 += 1
+			stats.PacketIPv6++
 		case layers.LayerTypeTCP:
 			tcp = curLayer.(*layers.TCP)
-			stats.PacketTcp += 1
+			stats.PacketTcp++
 
 			if !DoParseTcp {
 				return
@@ -133,10 +134,10 @@ func AnalyzePacket(packet gopacket.Packet, schema *DnsSchema, stats *Statistics)
 			msg = new(dns.Msg)
 			if err := msg.Unpack(tcp.Payload); err != nil {
 				log.Errorf("Could not decode DNS: %v\n", err)
-				stats.PacketErrors += 1
+				stats.PacketErrors++
 				return
 			}
-			stats.PacketDns += 1
+			stats.PacketDns++
 
 			schema.SourcePort = uint16(tcp.SrcPort)
 			schema.DestinationPort = uint16(tcp.DstPort)
@@ -144,15 +145,15 @@ func AnalyzePacket(packet gopacket.Packet, schema *DnsSchema, stats *Statistics)
 			schema.Sha256 = fmt.Sprintf("%x", sha256.Sum256(tcp.Payload))
 		case layers.LayerTypeUDP:
 			udp = curLayer.(*layers.UDP)
-			stats.PacketUdp += 1
+			stats.PacketUdp++
 
 			msg = new(dns.Msg)
 			if err := msg.Unpack(udp.Payload); err != nil {
 				log.Errorf("Could not decode DNS: %v\n", err)
-				stats.PacketErrors += 1
+				stats.PacketErrors++
 				return
 			}
-			stats.PacketDns += 1
+			stats.PacketDns++
 
 			schema.SourcePort = uint16(udp.SrcPort)
 			schema.DestinationPort = uint16(udp.DstPort)
@@ -166,7 +167,7 @@ func AnalyzePacket(packet gopacket.Packet, schema *DnsSchema, stats *Statistics)
 		// Let's check if we had any errors decoding any of the packet layers
 		if err := packet.ErrorLayer(); err != nil {
 			log.Debugf("Error decoding some part of the packet:", err)
-			stats.PacketErrors += 1
+			stats.PacketErrors++
 		}
 
 		return
