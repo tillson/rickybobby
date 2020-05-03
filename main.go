@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"log"
 	_ "net/http/pprof"
 	"os"
@@ -9,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/linkedin/goavro"
 	"github.com/pkg/profile"
 	"github.com/spf13/viper"
 	"gopkg.in/urfave/cli.v1"
@@ -80,30 +80,19 @@ func pcapCommand(c *cli.Context) error {
 		if !c.GlobalIsSet("output-file") {
 			return cli.NewExitError("ERROR: must provide output-file argument when using file output", 1)
 		}
-		parser.MapWriteChannel = make(chan map[string]interface{})
+		// parser.MapWriteChannel = make(chan map[string]interface{})
+		parser.ByteWriteChannel = make(chan []byte)
+
 		parser.WriteWaitGroup = &sync.WaitGroup{}
 		outfile, err := os.Create(parser.OutputFile)
 		if err != nil {
 			log.Fatalf("Failed to open output file: %v", err)
 		}
 		if parser.Format == "avro" {
-			codec, err := producer.NewAvroCodec()
-			if err != nil {
-				log.Fatalf("Failed to create avro codec: %v", err)
-			}
-			ocfw, err := goavro.NewOCFWriter(goavro.OCFConfig{
-				W:               outfile,
-				Codec:           codec,
-				CompressionName: "null",
-			})
-			if err != nil {
-				log.Fatalf("Failed to create OCF writer: %v", err)
-			}
-			parser.OCFWriter = ocfw
-		} else {
-			parser.OutputStream = outfile
+			parser.AvroCodec, err = producer.NewAvroCodec()
 		}
-		go parser.WriteMapOutput()
+		parser.OutputStream = bufio.NewWriter(outfile)
+		go parser.WriteByteOutput()
 		defer func() {
 			parser.WriteWaitGroup.Wait()
 			if err := outfile.Close(); err != nil {

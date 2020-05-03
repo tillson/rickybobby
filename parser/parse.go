@@ -86,7 +86,6 @@ func ParseDns(handle *pcap.Handle) {
 	// Use the handle as a packet source to process all packets
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	packetSource.NoCopy = true
-	// schema := DnsSchema{}
 
 	for packet := range packetSource.Packets() {
 		schema := dnsSchemaPool.Get().(*DnsSchema)

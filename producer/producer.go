@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/Shopify/sarama"
-	"github.com/linkedin/goavro"
+	"github.com/hamba/avro"
 )
 
 var (
@@ -46,8 +46,7 @@ func NewProducer() sarama.AsyncProducer {
 	return producer
 }
 
-func NewAvroCodec() (*goavro.Codec, error) {
-	// schema := readSchema()
+func NewAvroCodec() (avro.Schema, error) {
 	schema := `{
 		"type": "record",
 		"name": "dns_record",
@@ -133,5 +132,5 @@ func NewAvroCodec() (*goavro.Codec, error) {
 			"default": null
 		  } ]
 		}`
-	return goavro.NewCodec(schema)
+	return avro.Parse(schema)
 }

@@ -1,17 +1,15 @@
 package parser
 
 import (
+	"bufio"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
-	"os"
 	"rickybobby/producer"
 	"strings"
 	"sync"
 
 	"github.com/Shopify/sarama"
-	"github.com/leboncoin/structs"
-	"github.com/linkedin/goavro"
+	"github.com/hamba/avro"
 	"github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 )
@@ -20,9 +18,7 @@ var (
 	Format           = "json"
 	OutputType       = ""
 	OutputFile       = ""
-	OutputStream     *os.File
-	OCFWriter        *goavro.OCFWriter
-	MapWriteChannel  chan map[string]interface{}
+	OutputStream     *bufio.Writer
 	ByteWriteChannel chan []byte
 	WriteWaitGroup   *sync.WaitGroup
 	WriteDone        chan bool
@@ -86,116 +82,160 @@ func (d DnsSchema) FormatOutput(rr *dns.RR, section int) {
 
 }
 
+var AvroCodec avro.Schema
+
 func FormatOutputExport(schema *DnsSchema) {
 	var schemaIdentifier uint32 = 3
 	var schemaIdentifierBuffer []byte = make([]byte, 4)
 	binary.BigEndian.PutUint32(schemaIdentifierBuffer, schemaIdentifier)
 
 	if Format == "avro" {
-		avroMap := DNSToAvroMap(schema)
+		avroMap := DnsSchemaToAvro(schema)
 		WriteWaitGroup.Add(1)
-		MapWriteChannel <- avroMap
+		ByteWriteChannel <- avroMap
 	} else if Format == "json" {
-		jsonData, err := json.Marshal(&schema)
-		if err != nil {
-			log.Warnf("Error converting to JSON: %v", err)
-		}
-		if OutputType == "stdout" {
-			fmt.Printf("%s\n", jsonData)
-		} else if OutputType == "kafka" {
-			codec, err := producer.NewAvroCodec()
-			if err != nil {
-				log.Fatalf("Failed to convert Go map to Avro JSON data: %v", err)
-			}
-			avroJSON, err := codec.TextualFromNative(nil, DNSToAvroMap(schema))
-			producer.Producer.Input() <- &sarama.ProducerMessage{
-				Topic: producer.Topic,
-				Key:   sarama.StringEncoder(producer.MessageKey),
-				Value: sarama.ByteEncoder(avroJSON),
-			}
-		} else if OutputType == "file" {
-			go func() {
-				_, err := OutputStream.Write(jsonData)
-				if err != nil {
-					log.Fatalf("Failed to output JSON to a file: %v", err)
-				}
-			}()
-		}
+		// jsonData, err := json.Marshal(&schema)
+		// if err != nil {
+		// 	log.Warnf("Error converting to JSON: %v", err)
+		// }
+		// if OutputType == "stdout" {
+		// 	fmt.Printf("%s\n", jsonData)
+		// } else if OutputType == "kafka" {
+		// 	codec, err := producer.NewAvroCodec()
+		// 	if err != nil {
+		// 		log.Fatalf("Failed to convert Go map to Avro JSON data: %v", err)
+		// 	}
+		// 	avroJSON, err := codec.TextualFromNative(nil, DnsSchemaToAvro(schema))
+		// 	producer.Producer.Input() <- &sarama.ProducerMessage{
+		// 		Topic: producer.Topic,
+		// 		Key:   sarama.StringEncoder(producer.MessageKey),
+		// 		Value: sarama.ByteEncoder(avroJSON),
+		// 	}
+		// } else if OutputType == "file" {
+		// 	go func() {
+		// 		_, err := OutputStream.Write(jsonData)
+		// 		if err != nil {
+		// 			log.Fatalf("Failed to output JSON to a file: %v", err)
+		// 		}
+		// 	}()
+		// }
 	}
 	// dnsSchemaPool.Put(schema)
 }
 
-// ConsumeAvro consumes DNSSchema from WriteChannel, turns it into an avro buffer, and
-// writes it to its right place.
-func WriteMapOutput() {
+func WriteByteOutput() {
 	var schemaIdentifier uint32 = 3
 	var schemaIdentifierBuffer []byte = make([]byte, 4)
 	binary.BigEndian.PutUint32(schemaIdentifierBuffer, schemaIdentifier)
-	codec, err := producer.NewAvroCodec()
-	if err != nil {
-		log.Fatalf("Failed to initialize avro codec: %v", err)
-	}
 	schemaVersion := producer.SchemaVersion
 	var confluentAvroHeader []byte = make([]byte, schemaVersion)
-
-	for avroMap := range MapWriteChannel {
+	for bytes := range ByteWriteChannel {
 		if OutputType == "kafka" {
-			binary, err := codec.BinaryFromNative(nil, avroMap)
-			confluentMessage := append(confluentAvroHeader, binary...)
-			if err != nil {
-				log.Fatalf("Failed to convert Go map to Avro binary data: %v", err)
-			}
+			confluentMessage := append(confluentAvroHeader, bytes...)
 			producer.Producer.Input() <- &sarama.ProducerMessage{
 				Topic: producer.Topic,
 				Key:   sarama.StringEncoder(producer.MessageKey),
 				Value: sarama.ByteEncoder(confluentMessage),
 			}
 		} else if OutputType == "stdout" {
-			fmt.Printf("%s\n", avroMap)
+			fmt.Printf("%s\n", bytes)
 		} else if OutputType == "file" {
-			var values []map[string]interface{}
-			values = append(values, avroMap)
-			err = OCFWriter.Append(values)
+			fmt.Fprint(OutputStream, bytes)
+			err := OutputStream.Flush()
 			if err != nil {
-				log.Fatalf("Error writing values to file: %v", err)
+				log.Fatalf("Failed to output avro to a file: %v", err)
 			}
-			if err != nil {
-				log.Fatalf("Failed to output AVRO to a file: %v", err)
-			}
+			// _, err := OutputStream.Write(bytes)
+			// _, err := fmt.Fprintln(OutputmStream, bytes)
 		}
 		WriteWaitGroup.Done()
 	}
 }
 
-type AvroDnsSchema struct {
-	Timestamp          int64                  `structs:"timestamp"`
-	Udp                bool                   `structs:"udp"`
-	IpVersion          int                    `structs:"ip_version"`
-	SourceAddress      string                 `structs:"ip_src"`
-	DestinationAddress string                 `structs:"ip_dst"`
-	DestinationPort    int                    `structs:"dst_port"`
-	Id                 int                    `structs:"txid"`
-	Rcode              int                    `structs:"rcode"`
-	Truncated          bool                   `structs:"truncated"`
-	Response           bool                   `structs:"response"`
-	RecursionDesired   bool                   `structs:"recursion_desired"`
-	Answer             map[string]interface{} `structs:"answer"`
-	Authority          map[string]interface{} `structs:"authority"`
-	Additional         map[string]interface{} `structs:"additional"`
-	Qname              string                 `structs:"qname"`
-	Qtype              int                    `structs:"qtype"`
-	Ttl                map[string]interface{} `structs:"ttl,omitempty"`
-	Rname              map[string]interface{} `structs:"rname,omitempty"`
-	Rtype              map[string]interface{} `structs:"rtype,omitempty"`
-	Rdata              map[string]interface{} `structs:"rdata,omitempty"`
-	EcsClient          map[string]interface{} `structs:"ecs_client,omitempty"`
-	EcsSource          map[string]interface{} `structs:"ecs_source,omitempty"`
-	EcsScope           map[string]interface{} `structs:"ecs_scope,omitempty"`
-	Source             string                 `structs:"source"`
-	Sensor             map[string]interface{} `structs:"sensor,omitempty"`
+// ConsumeAvro consumes DNSSchema from WriteChannel, turns it into an avro buffer, and
+// writes it to its right place.
+func WriteMapOutput() {
+	// var schemaIdentifier uint32 = 3
+	// var schemaIdentifierBuffer []byte = make([]byte, 4)
+	// binary.BigEndian.PutUint32(schemaIdentifierBuffer, schemaIdentifier)
+	// if err != nil {
+	// 	log.Fatalf("Failed to initialize avro codec: %v", err)
+	// }
+	// schemaVersion := producer.SchemaVersion
+	// var confluentAvroHeader []byte = make([]byte, schemaVersion)
+
+	// for avroMap := range MapWriteChannel {
+	// 	if OutputType == "kafka" {
+	// 		binary, err := codec.BinaryFromNative(nil, avroMap)
+	// 		confluentMessage := append(confluentAvroHeader, binary...)
+	// 		if err != nil {
+	// 			log.Fatalf("Failed to convert Go map to Avro binary data: %v", err)
+	// 		}
+	// 		producer.Producer.Input() <- &sarama.ProducerMessage{
+	// 			Topic: producer.Topic,
+	// 			Key:   sarama.StringEncoder(producer.MessageKey),
+	// 			Value: sarama.ByteEncoder(confluentMessage),
+	// 		}
+	// 	} else if OutputType == "stdout" {
+	// 		fmt.Printf("%s\n", avroMap)
+	// 	} else if OutputType == "file" {
+	// 		var values []map[string]interface{}
+	// 		values = append(values, avroMap)
+	// 		err = OCFWriter.Append(values)
+	// 		if err != nil {
+	// 			log.Fatalf("Error writing values to file: %v", err)
+	// 		}
+	// 		if err != nil {
+	// 			log.Fatalf("Failed to output AVRO to a file: %v", err)
+	// 		}
+	// 	}
+	// 	WriteWaitGroup.Done()
+	// }
 }
 
-func DNSToAvroMap(schema *DnsSchema) map[string]interface{} {
+type stringUnion struct {
+	String string `avro:"string"`
+}
+
+// type boolUnion struct {
+// 	Bool bool `avro:"boolean"`
+// }
+type intUnion struct {
+	Int int `avro:"int"`
+}
+type longUnion struct {
+	Long int `avro:"long"`
+}
+
+type AvroDnsSchema struct {
+	Timestamp          int64                  `avro:"timestamp"`
+	Udp                bool                   `avro:"udp"`
+	IpVersion          int                    `avro:"ip_version"`
+	SourceAddress      string                 `avro:"ip_src"`
+	DestinationAddress string                 `avro:"ip_dst"`
+	DestinationPort    int                    `avro:"dst_port"`
+	Id                 int                    `avro:"txid"`
+	Rcode              int                    `avro:"rcode"`
+	Truncated          bool                   `avro:"truncated"`
+	Response           bool                   `avro:"response"`
+	RecursionDesired   bool                   `avro:"recursion_desired"`
+	Answer             map[string]interface{} `avro:"answer"`
+	Authority          map[string]interface{} `avro:"authority"`
+	Additional         map[string]interface{} `avro:"additional"`
+	Qname              string                 `avro:"qname"`
+	Qtype              int                    `avro:"qtype"`
+	Ttl                longUnion              `avro:"ttl,omitempty"`
+	Rname              stringUnion            `avro:"rname,omitempty"`
+	Rtype              intUnion               `avro:"rtype,omitempty"`
+	Rdata              stringUnion            `avro:"rdata,omitempty"`
+	EcsClient          stringUnion            `avro:"ecs_client,omitempty"`
+	EcsSource          stringUnion            `avro:"ecs_source,omitempty"`
+	EcsScope           stringUnion            `avro:"ecs_scope,omitempty"`
+	Source             string                 `avro:"source"`
+	Sensor             stringUnion            `avro:"sensor,omitempty"`
+}
+
+func DnsSchemaToAvro(schema *DnsSchema) []byte {
 	avroMap := avroSchemaPool.Get().(*AvroDnsSchema)
 
 	avroMap.Timestamp = schema.Timestamp
@@ -215,28 +255,28 @@ func DNSToAvroMap(schema *DnsSchema) map[string]interface{} {
 	avroMap.Source = schema.Source
 
 	if schema.Rname != nil {
-		avroMap.Rname = map[string]interface{}{"string": *schema.Rname}
+		avroMap.Rname = stringUnion{String: *schema.Rname}
 	}
 	if schema.Rtype != nil {
-		avroMap.Rtype = map[string]interface{}{"int": int32(*schema.Rtype)}
+		avroMap.Rtype = intUnion{Int: int(*schema.Rtype)}
 	}
 	if schema.Rdata != nil {
-		avroMap.Rdata = map[string]interface{}{"string": *schema.Rdata}
+		avroMap.Rdata = stringUnion{String: *schema.Rdata}
 	}
 	if schema.Ttl != nil {
-		avroMap.Ttl = map[string]interface{}{"long": int64(*schema.Ttl)}
+		avroMap.Ttl = longUnion{Long: int(*schema.Ttl)}
 	}
 	if schema.EcsClient != nil {
-		avroMap.EcsClient = map[string]interface{}{"string": *schema.EcsClient}
+		avroMap.EcsClient = stringUnion{String: *schema.EcsClient}
 	}
 	if schema.EcsSource != nil {
-		avroMap.EcsSource = map[string]interface{}{"string": string(*schema.EcsSource)}
+		avroMap.EcsSource = stringUnion{String: string(*schema.EcsSource)}
 	}
 	if schema.EcsScope != nil {
-		avroMap.EcsScope = map[string]interface{}{"string": string(*schema.EcsScope)}
+		avroMap.EcsScope = stringUnion{String: string(*schema.EcsScope)}
 	}
 	if schema.Source != "" {
-		avroMap.Sensor = map[string]interface{}{"string": schema.Sensor}
+		avroMap.Sensor = stringUnion{String: schema.Sensor}
 	}
 
 	if schema.Ipv4 {
@@ -244,7 +284,10 @@ func DNSToAvroMap(schema *DnsSchema) map[string]interface{} {
 	} else {
 		avroMap.IpVersion = 6
 	}
-	stringMap := structs.Map(avroMap)
+	bytes, err := avro.Marshal(AvroCodec, avroMap)
 	avroSchemaPool.Put(avroMap)
-	return stringMap
+	if err != nil {
+		log.Fatal(err)
+	}
+	return bytes
 }
