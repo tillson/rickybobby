@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"log"
-	_ "net/http/pprof"
 	"os"
 	"rickybobby/parser"
 	"rickybobby/producer"
@@ -35,10 +34,6 @@ func loadGlobalOptions(c *cli.Context) {
 
 func pcapCommand(c *cli.Context) error {
 
-	// go func() {
-	// 	log.Println(http.ListenAndServe("localhost:6060", nil))
-	// }()
-
 	if c.NArg() < 1 {
 		return cli.NewExitError("ERROR: must provide at least one filename", 1)
 	}
@@ -55,6 +50,13 @@ func pcapCommand(c *cli.Context) error {
 		viper.SetDefault("KafkaSASLPassword", "")
 		viper.SetConfigFile(parser.Config)
 		viper.ReadInConfig()
+	}
+	if parser.Format == "avro" {
+		codec, err := producer.NewAvroCodec()
+		if err != nil {
+			log.Fatal("Failed to initialize avro codec.")
+		}
+		parser.AvroCodec = codec
 	}
 	if parser.OutputType == "kafka" {
 		if producer.MessageKey == "" {
@@ -81,24 +83,23 @@ func pcapCommand(c *cli.Context) error {
 			return cli.NewExitError("ERROR: must provide output-file argument when using file output", 1)
 		}
 		// parser.MapWriteChannel = make(chan map[string]interface{})
-		parser.ByteWriteChannel = make(chan []byte)
 
-		parser.WriteWaitGroup = &sync.WaitGroup{}
 		outfile, err := os.Create(parser.OutputFile)
 		if err != nil {
 			log.Fatalf("Failed to open output file: %v", err)
 		}
-		if parser.Format == "avro" {
-			parser.AvroCodec, err = producer.NewAvroCodec()
-		}
 		parser.OutputStream = bufio.NewWriter(outfile)
-		go parser.WriteByteOutput()
 		defer func() {
 			parser.WriteWaitGroup.Wait()
 			if err := outfile.Close(); err != nil {
 				log.Fatalf("Failed to close output file: %v", err)
 			}
 		}()
+	}
+	if parser.OutputType == "file" || parser.OutputType == "stdout" {
+		parser.ByteWriteChannel = make(chan []byte, 1000)
+		parser.WriteWaitGroup = &sync.WaitGroup{}
+		go parser.WriteByteOutput()
 	}
 	for _, f := range c.Args() {
 		parser.ParseFile(f)
