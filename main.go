@@ -89,6 +89,7 @@ func pcapCommand(c *cli.Context) error {
 			log.Fatalf("Failed to open output file: %v", err)
 		}
 		parser.OutputStream = bufio.NewWriter(outfile)
+		parser.OutputStream = bufio.NewWriterSize(parser.OutputStream, 1000)
 		defer func() {
 			parser.WriteWaitGroup.Wait()
 			if err := outfile.Close(); err != nil {

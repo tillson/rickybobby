@@ -11,6 +11,7 @@ require (
 	github.com/linkedin/goavro v2.1.0+incompatible // indirect
 	github.com/mdlayher/raw v0.0.0-20190606144222-a54781e5f38f // indirect
 	github.com/miekg/dns v1.1.15
+	github.com/panjf2000/ants v1.3.0 // indirect
 	github.com/pkg/profile v1.3.0
 	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/viper v1.6.2

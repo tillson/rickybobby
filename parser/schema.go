@@ -11,6 +11,7 @@ import (
 
 	"github.com/Shopify/sarama"
 	"github.com/hamba/avro"
+	"github.com/hamba/avro/ocf"
 	"github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 )
@@ -119,16 +120,14 @@ func (d DnsSchema) FormatOutput(rr *dns.RR, section int) {
 			return
 		}
 	}
-	go FormatOutputExport(&d)
-
+	FormatOutputExport(&d)
 }
 
 // FormatOutputExport converts DnsSchema into suitable formats (avro/json) and
 // writes them to the proper destination (stdout/file/kafka)
 func FormatOutputExport(schema *DnsSchema) {
 	if Format == "avro" {
-		WriteWaitGroup.Add(1)
-		go DnsSchemaToAvro(schema, ByteWriteChannel)
+		DnsSchemaToAvro(schema, ByteWriteChannel)
 	} else if Format == "json" {
 		jsonData, err := json.Marshal(&schema)
 		if err != nil {
@@ -168,7 +167,18 @@ func WriteByteOutput() {
 	schemaVersion := producer.SchemaVersion
 	var confluentAvroHeader []byte = make([]byte, schemaVersion)
 
-	blockWriter := avro.NewWriter(OutputStream, 100)
+	var avroWriter = avro.NewWriter(OutputStream, 1000)
+	if OutputType == "file" && Format == "avro" {
+		var magicBytes = [4]byte{'O', 'b', 'j', 1}
+		var HeaderSchema = ocf.HeaderSchema
+		header := ocf.Header{
+			Magic: magicBytes,
+			Meta:  nil,
+		}
+		avroWriter.WriteVal(HeaderSchema, header)
+	}
+
+	buffered := 0
 	for bytes := range ByteWriteChannel {
 		if OutputType == "kafka" {
 			confluentMessage := append(confluentAvroHeader, bytes...)
@@ -180,8 +190,15 @@ func WriteByteOutput() {
 		} else if OutputType == "stdout" {
 			fmt.Printf("%s\n", bytes)
 		} else if OutputType == "file" {
-			blockWriter.WriteBytes(bytes)
+			len := len(bytes)
+			buffered += len
+			if buffered > 1000 {
+				avroWriter.Flush()
+				buffered = len
+			}
+			avroWriter.WriteBytes(bytes)
 		}
+		avroWriter.Flush()
 		WriteWaitGroup.Done()
 	}
 }
@@ -244,5 +261,6 @@ func DnsSchemaToAvro(schema *DnsSchema, channel chan []byte) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	WriteWaitGroup.Add(1)
 	channel <- bytes
 }

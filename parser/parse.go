@@ -3,6 +3,8 @@ package parser
 import (
 	"crypto/sha256"
 	"fmt"
+	"io"
+	_ "net/http/pprof"
 	"os"
 	"time"
 
@@ -87,13 +89,38 @@ func ParseDns(handle *pcap.Handle) {
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	packetSource.NoCopy = true
 
-	for packet := range packetSource.Packets() {
-		schema := dnsSchemaPool.Get().(*DnsSchema)
-		schema.Sensor = Sensor
-		schema.Source = Source
-		stats.PacketTotal++
-		AnalyzePacket(packet, schema, &stats)
+	analyzeChannel := make(chan gopacket.Packet, 500000)
+	done := make(chan bool, 500000)
+	for i := 0; i < 1500000; i++ {
+		go func() {
+			for packet := range analyzeChannel {
+				schema := dnsSchemaPool.Get().(*DnsSchema)
+				schema.Sensor = Sensor
+				schema.Source = Source
+				stats.PacketTotal++
+				go AnalyzePacket(packet, schema, &stats, done)
+				<-done
+			}
+		}()
 	}
+	for {
+		packet, err := packetSource.NextPacket()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			log.Println("Error:", err)
+			continue
+		}
+		analyzeChannel <- packet
+	}
+
+	// for packet := range packetSource.Packets() {
+	// 	schema := dnsSchemaPool.Get().(*DnsSchema)
+	// 	schema.Sensor = Sensor
+	// 	schema.Source = Source
+	// 	stats.PacketTotal++
+	// 	AnalyzePacket(packet, schema, &stats)
+	// }
 
 	log.Infof("Number of TOTAL packets: %v", stats.PacketTotal)
 	log.Infof("Number of IPv4 packets: %v", stats.PacketIPv4)
@@ -104,7 +131,7 @@ func ParseDns(handle *pcap.Handle) {
 	log.Infof("Number of FAILED packets: %v", stats.PacketErrors)
 }
 
-func AnalyzePacket(packet gopacket.Packet, schema *DnsSchema, stats *Statistics) {
+func AnalyzePacket(packet gopacket.Packet, schema *DnsSchema, stats *Statistics, done chan bool) {
 
 	// Let's analyze decoded layers
 	var msg *dns.Msg
@@ -127,6 +154,7 @@ func AnalyzePacket(packet gopacket.Packet, schema *DnsSchema, stats *Statistics)
 			stats.PacketTcp++
 
 			if !DoParseTcp {
+				done <- false
 				return
 			}
 
@@ -134,6 +162,7 @@ func AnalyzePacket(packet gopacket.Packet, schema *DnsSchema, stats *Statistics)
 			if err := msg.Unpack(tcp.Payload); err != nil {
 				log.Errorf("Could not decode DNS: %v\n", err)
 				stats.PacketErrors++
+				done <- false
 				return
 			}
 			stats.PacketDns++
@@ -150,6 +179,7 @@ func AnalyzePacket(packet gopacket.Packet, schema *DnsSchema, stats *Statistics)
 			if err := msg.Unpack(udp.Payload); err != nil {
 				log.Errorf("Could not decode DNS: %v\n", err)
 				stats.PacketErrors++
+				done <- false
 				return
 			}
 			stats.PacketDns++
@@ -168,12 +198,13 @@ func AnalyzePacket(packet gopacket.Packet, schema *DnsSchema, stats *Statistics)
 			log.Debugf("Error decoding some part of the packet:", err)
 			stats.PacketErrors++
 		}
-
+		done <- false
 		return
 	}
 
 	// Ignore questions unless flag set
 	if !msg.Response && !DoParseQuestions && !DoParseQuestionsEcs {
+		done <- false
 		return
 	}
 
@@ -240,5 +271,7 @@ func AnalyzePacket(packet gopacket.Packet, schema *DnsSchema, stats *Statistics)
 	for _, rr := range msg.Extra {
 		schema.FormatOutput(&rr, DnsAdditional)
 	}
+
+	done <- true
 
 }
