@@ -31,11 +31,11 @@ var (
 // The ECS fields are pointers because they're nullable.
 type DnsSchema struct {
 	Timestamp          int64   `json:"timestamp" avro:"timestamp"`
-	Sha256             string  `json:"sha256"`
+	Sha256             string  `json:"sha256" avro:"-"`
 	Udp                bool    `json:"udp" avro:"udp"`
-	Ipv4               bool    `json:"ipv4"`
+	Ipv4               bool    `json:"ipv4" avro:"-"`
 	SourceAddress      string  `json:"src_address" avro:"ip_src"`
-	SourcePort         int     `json:"src_port"`
+	SourcePort         int     `json:"src_port" avro:"-"`
 	DestinationAddress string  `json:"dst_address" avro:"ip_dst"`
 	DestinationPort    int     `json:"dst_port" avro:"dst_port"`
 	Id                 int     `json:"id" avro:"txid"`
@@ -43,33 +43,33 @@ type DnsSchema struct {
 	Truncated          bool    `json:"truncated" avro:"truncated"`
 	Response           bool    `json:"response" avro:"response"`
 	RecursionDesired   bool    `json:"recursion_desired" avro:"recursion_desired"`
-	Answer             bool    `json:"answer"`
-	Authority          bool    `json:"authority"`
-	Additional         bool    `json:"additional"`
+	Answer             bool    `json:"answer avro:"-""`
+	Authority          bool    `json:"authority" avro:"-"`
+	Additional         bool    `json:"additional avro:"-""`
 	Qname              string  `json:"qname" avro:"qname"`
 	Qtype              int     `json:"qtype" avro:"qtype"`
-	Ttl                *uint32 `json:"ttl"`
-	Rname              *string `json:"rname"`
-	Rtype              *uint16 `json:"rtype"`
-	Rdata              *string `json:"rdata"`
-	EcsClient          *string `json:"ecs_client"`
-	EcsSource          *uint8  `json:"ecs_source"`
-	EcsScope           *uint8  `json:"ecs_scope"`
+	Ttl                *uint32 `json:"ttl" avro:"-"`
+	Rname              *string `json:"rname" avro:"-"`
+	Rtype              *uint16 `json:"rtype" avro:"-"`
+	Rdata              *string `json:"rdata" avro:"-"`
+	EcsClient          *string `json:"ecs_client" avro:"-"`
+	EcsSource          *uint8  `json:"ecs_source" avro:"-"`
+	EcsScope           *uint8  `json:"ecs_scope" avro:"-"`
 	Source             string  `json:"source,omitempty" avro:"source"`
-	Sensor             string  `json:"sensor,omitempty"`
+	Sensor             string  `json:"sensor,omitempty" avro:"-"`
 
-	IPVersionAvro  int                    `avro:"ip_version"`
-	AnswerAvro     map[string]interface{} `avro:"answer"`
-	AuthorityAvro  map[string]interface{} `avro:"authority"`
-	AdditionalAvro map[string]interface{} `avro:"additional"`
-	TTLAvro        longUnion              `avro:"ttl,omitempty"`
-	RnameAvro      stringUnion            `avro:"rname,omitempty"`
-	RtypeAvro      intUnion               `avro:"rtype,omitempty"`
-	RdataAvro      stringUnion            `avro:"rdata,omitempty"`
-	EcsClientAvro  stringUnion            `avro:"ecs_client,omitempty"`
-	EcsSourceAvro  stringUnion            `avro:"ecs_source,omitempty"`
-	EcsScopeAvro   stringUnion            `avro:"ecs_scope,omitempty"`
-	SensorAvro     stringUnion            `avro:"sensor,omitempty"`
+	IPVersionAvro  int                    `avro:"ip_version" json:"-"`
+	AnswerAvro     map[string]interface{} `avro:"answer" json:"-"`
+	AuthorityAvro  map[string]interface{} `avro:"authority" json:"-"`
+	AdditionalAvro map[string]interface{} `avro:"additional" json:"-"`
+	TTLAvro        longUnion              `avro:"ttl,omitempty" json:"-"`
+	RnameAvro      stringUnion            `avro:"rname,omitempty" json:"-"`
+	RtypeAvro      intUnion               `avro:"rtype,omitempty" json:"-"`
+	RdataAvro      stringUnion            `avro:"rdata,omitempty" json:"-"`
+	EcsClientAvro  stringUnion            `avro:"ecs_client,omitempty" json:"-"`
+	EcsSourceAvro  stringUnion            `avro:"ecs_source,omitempty" json:"-"`
+	EcsScopeAvro   stringUnion            `avro:"ecs_scope,omitempty" json:"-"`
+	SensorAvro     stringUnion            `avro:"sensor,omitempty" json:"-"`
 }
 
 type stringUnion struct {
@@ -180,7 +180,7 @@ func WriteByteOutput() {
 				avroWriter.Flush()
 				buffered = len
 			}
-			avroWriter.WriteBytes(bytes)
+			avroWriter.Write(bytes)
 		}
 		avroWriter.Flush()
 		WriteWaitGroup.Done()
