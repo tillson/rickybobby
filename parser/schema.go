@@ -30,24 +30,24 @@ var (
 // JSON serialization only supports nullifying types that can accept nil.
 // The ECS fields are pointers because they're nullable.
 type DnsSchema struct {
-	Timestamp          int64   `json:"timestamp"`
+	Timestamp          int64   `json:"timestamp" avro:"timestamp"`
 	Sha256             string  `json:"sha256"`
-	Udp                bool    `json:"udp"`
+	Udp                bool    `json:"udp" avro:"udp"`
 	Ipv4               bool    `json:"ipv4"`
-	SourceAddress      string  `json:"src_address"`
-	SourcePort         uint16  `json:"src_port"`
-	DestinationAddress string  `json:"dst_address"`
-	DestinationPort    uint16  `json:"dst_port"`
-	Id                 uint16  `json:"id"`
-	Rcode              int     `json:"rcode"`
-	Truncated          bool    `json:"truncated"`
-	Response           bool    `json:"response"`
-	RecursionDesired   bool    `json:"recursion_desired"`
+	SourceAddress      string  `json:"src_address" avro:"ip_src"`
+	SourcePort         int     `json:"src_port"`
+	DestinationAddress string  `json:"dst_address" avro:"ip_dst"`
+	DestinationPort    int     `json:"dst_port" avro:"dst_port"`
+	Id                 int     `json:"id" avro:"txid"`
+	Rcode              int     `json:"rcode" avro:"rcode"`
+	Truncated          bool    `json:"truncated" avro:"truncated"`
+	Response           bool    `json:"response" avro:"response"`
+	RecursionDesired   bool    `json:"recursion_desired" avro:"recursion_desired"`
 	Answer             bool    `json:"answer"`
 	Authority          bool    `json:"authority"`
 	Additional         bool    `json:"additional"`
-	Qname              string  `json:"qname"`
-	Qtype              uint16  `json:"qtype"`
+	Qname              string  `json:"qname" avro:"qname"`
+	Qtype              int     `json:"qtype" avro:"qtype"`
 	Ttl                *uint32 `json:"ttl"`
 	Rname              *string `json:"rname"`
 	Rtype              *uint16 `json:"rtype"`
@@ -55,37 +55,21 @@ type DnsSchema struct {
 	EcsClient          *string `json:"ecs_client"`
 	EcsSource          *uint8  `json:"ecs_source"`
 	EcsScope           *uint8  `json:"ecs_scope"`
-	Source             string  `json:"source,omitempty"`
+	Source             string  `json:"source,omitempty" avro:"source"`
 	Sensor             string  `json:"sensor,omitempty"`
-}
 
-// AvroDnsSchema represents the avro schema
-type AvroDnsSchema struct {
-	Timestamp          int64                  `avro:"timestamp"`
-	Udp                bool                   `avro:"udp"`
-	IpVersion          int                    `avro:"ip_version"`
-	SourceAddress      string                 `avro:"ip_src"`
-	DestinationAddress string                 `avro:"ip_dst"`
-	DestinationPort    int                    `avro:"dst_port"`
-	Id                 int                    `avro:"txid"`
-	Rcode              int                    `avro:"rcode"`
-	Truncated          bool                   `avro:"truncated"`
-	Response           bool                   `avro:"response"`
-	RecursionDesired   bool                   `avro:"recursion_desired"`
-	Answer             map[string]interface{} `avro:"answer"`
-	Authority          map[string]interface{} `avro:"authority"`
-	Additional         map[string]interface{} `avro:"additional"`
-	Qname              string                 `avro:"qname"`
-	Qtype              int                    `avro:"qtype"`
-	Ttl                longUnion              `avro:"ttl,omitempty"`
-	Rname              stringUnion            `avro:"rname,omitempty"`
-	Rtype              intUnion               `avro:"rtype,omitempty"`
-	Rdata              stringUnion            `avro:"rdata,omitempty"`
-	EcsClient          stringUnion            `avro:"ecs_client,omitempty"`
-	EcsSource          stringUnion            `avro:"ecs_source,omitempty"`
-	EcsScope           stringUnion            `avro:"ecs_scope,omitempty"`
-	Source             string                 `avro:"source"`
-	Sensor             stringUnion            `avro:"sensor,omitempty"`
+	IPVersionAvro  int                    `avro:"ip_version"`
+	AnswerAvro     map[string]interface{} `avro:"answer"`
+	AuthorityAvro  map[string]interface{} `avro:"authority"`
+	AdditionalAvro map[string]interface{} `avro:"additional"`
+	TTLAvro        longUnion              `avro:"ttl,omitempty"`
+	RnameAvro      stringUnion            `avro:"rname,omitempty"`
+	RtypeAvro      intUnion               `avro:"rtype,omitempty"`
+	RdataAvro      stringUnion            `avro:"rdata,omitempty"`
+	EcsClientAvro  stringUnion            `avro:"ecs_client,omitempty"`
+	EcsSourceAvro  stringUnion            `avro:"ecs_source,omitempty"`
+	EcsScopeAvro   stringUnion            `avro:"ecs_scope,omitempty"`
+	SensorAvro     stringUnion            `avro:"sensor,omitempty"`
 }
 
 type stringUnion struct {
@@ -120,7 +104,7 @@ func (d DnsSchema) FormatOutput(rr *dns.RR, section int) {
 			return
 		}
 	}
-	FormatOutputExport(&d)
+	go FormatOutputExport(&d)
 }
 
 // FormatOutputExport converts DnsSchema into suitable formats (avro/json) and
@@ -206,57 +190,43 @@ func WriteByteOutput() {
 // DnsSchemaToAvro converts DnsSchema to an avro buffer and sends it to the passed channel.
 // It then releases the DnsSchema buffer to a global sync.Pool for recycling
 func DnsSchemaToAvro(schema *DnsSchema, channel chan []byte) {
-	avroMap := avroSchemaPool.Get().(*AvroDnsSchema)
 
-	avroMap.Timestamp = schema.Timestamp
-
-	avroMap.SourceAddress = schema.SourceAddress
-	avroMap.DestinationAddress = schema.DestinationAddress
-	avroMap.DestinationPort = int(schema.DestinationPort)
-	avroMap.Id = int(schema.Id)
-	avroMap.Rcode = schema.Rcode
-	avroMap.Qtype = int(schema.Qtype)
-	avroMap.Qname = schema.Qname
-	avroMap.RecursionDesired = schema.RecursionDesired
-	avroMap.Response = schema.Response
-	avroMap.Answer = map[string]interface{}{"boolean": schema.Answer}
-	avroMap.Authority = map[string]interface{}{"boolean": schema.Authority}
-	avroMap.Additional = map[string]interface{}{"boolean": schema.Additional}
-	avroMap.Source = schema.Source
+	schema.AnswerAvro = map[string]interface{}{"boolean": schema.Answer}
+	schema.AuthorityAvro = map[string]interface{}{"boolean": schema.Authority}
+	schema.AdditionalAvro = map[string]interface{}{"boolean": schema.Additional}
 
 	if schema.Rname != nil {
-		avroMap.Rname = stringUnion{String: *schema.Rname}
+		schema.RnameAvro = stringUnion{String: *schema.Rname}
 	}
 	if schema.Rtype != nil {
-		avroMap.Rtype = intUnion{Int: int(*schema.Rtype)}
+		schema.RtypeAvro = intUnion{Int: int(*schema.Rtype)}
 	}
 	if schema.Rdata != nil {
-		avroMap.Rdata = stringUnion{String: *schema.Rdata}
+		schema.RdataAvro = stringUnion{String: *schema.Rdata}
 	}
 	if schema.Ttl != nil {
-		avroMap.Ttl = longUnion{Long: int(*schema.Ttl)}
+		schema.TTLAvro = longUnion{Long: int(*schema.Ttl)}
 	}
 	if schema.EcsClient != nil {
-		avroMap.EcsClient = stringUnion{String: *schema.EcsClient}
+		schema.EcsClientAvro = stringUnion{String: *schema.EcsClient}
 	}
 	if schema.EcsSource != nil {
-		avroMap.EcsSource = stringUnion{String: string(*schema.EcsSource)}
+		schema.EcsSourceAvro = stringUnion{String: string(*schema.EcsSource)}
 	}
 	if schema.EcsScope != nil {
-		avroMap.EcsScope = stringUnion{String: string(*schema.EcsScope)}
+		schema.EcsScopeAvro = stringUnion{String: string(*schema.EcsScope)}
 	}
 	if schema.Source != "" {
-		avroMap.Sensor = stringUnion{String: schema.Sensor}
+		schema.SensorAvro = stringUnion{String: schema.Sensor}
 	}
 
 	if schema.Ipv4 {
-		avroMap.IpVersion = 4
+		schema.IPVersionAvro = 4
 	} else {
-		avroMap.IpVersion = 6
+		schema.IPVersionAvro = 6
 	}
-	bytes, err := avro.Marshal(AvroCodec, avroMap)
+	bytes, err := avro.Marshal(AvroCodec, schema)
 
-	avroSchemaPool.Put(avroMap)
 	dnsSchemaPool.Put(schema)
 	if err != nil {
 		log.Fatal(err)
