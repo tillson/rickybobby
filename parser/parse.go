@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"io"
 	_ "net/http/pprof"
 	"os"
@@ -98,14 +100,10 @@ func ParseDns(handle *pcap.Handle) {
 	packetSource.NoCopy = true
 
 	for {
-		packet := LayeredPacket{}
-		packet.parser = gopacket.NewDecodingLayerParser(layers.LayerTypeEthernet,
-			&packet.ethernet, &packet.ip4, &packet.ip6, &packet.tcp, &packet.udp, &packet.dot1q)
-		packet.parser.IgnoreUnsupported = true
-
+		packet := packetPool.Get().(*LayeredPacket)
 		// packet, err := packetSource.NextPacket
 		decodedLayers := make([]gopacket.LayerType, 0, 10)
-		bytes, _, err := handle.ZeroCopyReadPacketData()
+		bytes, info, err := handle.ZeroCopyReadPacketData()
 		if err == io.EOF {
 			break
 		} else if err != nil {
@@ -122,7 +120,7 @@ func ParseDns(handle *pcap.Handle) {
 		schema.Source = Source
 		stats.PacketTotal++
 
-		// AnalyzePacket(packet, schema, &info, &stats)
+		AnalyzePacket(decodedLayers, packet, schema, &info, &stats)
 	}
 
 	// analyzeChannel := make(chan *gopacket.Packet, 500000)
@@ -171,76 +169,76 @@ func ParseDns(handle *pcap.Handle) {
 	log.Infof("Number of FAILED packets: %v", stats.PacketErrors)
 }
 
-func AnalyzePacket(packet LayeredPacket, schema *DnsSchema, info *gopacket.CaptureInfo, stats *Statistics) {
+func AnalyzePacket(decodedLayers []gopacket.LayerType, packet *LayeredPacket, schema *DnsSchema, info *gopacket.CaptureInfo, stats *Statistics) {
 
 	// Let's analyze decoded layers
 	var msg *dns.Msg
-	// for _, curLayer := range layers {
-	// 	switch curLayer.LayerType() {
-	// 	case layers.LayerTypeIPv4:
-	// 		ip4 = curLayer.(*layers.IPv4)
-	// 		schema.SourceAddress = ip4.SrcIP.String()
-	// 		schema.DestinationAddress = ip4.DstIP.String()
-	// 		schema.Ipv4 = true
-	// 		stats.PacketIPv4++
-	// 	case layers.LayerTypeIPv6:
-	// 		ip6 = curLayer.(*layers.IPv6)
-	// 		schema.SourceAddress = ip6.SrcIP.String()
-	// 		schema.DestinationAddress = ip6.DstIP.String()
-	// 		schema.Ipv4 = false
-	// 		stats.PacketIPv6++
-	// 	case layers.LayerTypeTCP:
-	// 		tcp = curLayer.(*layers.TCP)
-	// 		stats.PacketTcp++
 
-	// 		if !DoParseTcp {
-	// 			// done <- false
-	// 			return
-	// 		}
+	for _, curLayer := range decodedLayers {
+		switch curLayer {
+		case layers.LayerTypeIPv4:
+			schema.SourceAddress = packet.ip4.SrcIP.String()
+			schema.DestinationAddress = packet.ip4.DstIP.String()
+			schema.Ipv4 = true
+			stats.PacketIPv4++
+		case layers.LayerTypeIPv6:
+			schema.SourceAddress = packet.ip6.SrcIP.String()
+			schema.DestinationAddress = packet.ip6.DstIP.String()
+			schema.Ipv4 = false
+			stats.PacketIPv6++
+		case layers.LayerTypeTCP:
+			stats.PacketTcp++
 
-	// 		msg = new(dns.Msg)
-	// 		if err := msg.Unpack(tcp.Payload); err != nil {
-	// 			log.Errorf("Could not decode DNS: %v\n", err)
-	// 			stats.PacketErrors++
-	// 			// done <- false
-	// 			return
-	// 		}
-	// 		stats.PacketDns++
+			if !DoParseTcp {
+				// done <- false
+				return
+			}
 
-	// 		schema.SourcePort = int(tcp.SrcPort)
-	// 		schema.DestinationPort = int(tcp.DstPort)
-	// 		schema.Udp = false
-	// 		schema.Sha256 = fmt.Sprintf("%x", sha256.Sum256(tcp.Payload))
-	// 	case layers.LayerTypeUDP:
-	// 		udp = curLayer.(*layers.UDP)
-	// 		stats.PacketUdp++
+			msg = new(dns.Msg)
+			if err := msg.Unpack(packet.tcp.Payload); err != nil {
+				log.Errorf("Could not decode DNS: %v\n", err)
+				stats.PacketErrors++
+				// done <- false
+				return
+			}
+			stats.PacketDns++
 
-	// 		msg = new(dns.Msg)
-	// 		if err := msg.Unpack(udp.Payload); err != nil {
-	// 			log.Errorf("Could not decode DNS: %v\n", err)
-	// 			stats.PacketErrors++
-	// 			// done <- false
-	// 			return
-	// 		}
-	// 		stats.PacketDns++
+			schema.SourcePort = int(packet.tcp.SrcPort)
+			schema.DestinationPort = int(packet.tcp.DstPort)
+			schema.Udp = false
+			schema.Sha256 = fmt.Sprintf("%x", sha256.Sum256(tcp.Payload))
+		case layers.LayerTypeUDP:
+			stats.PacketUdp++
 
-	// 		schema.SourcePort = int(udp.SrcPort)
-	// 		schema.DestinationPort = int(udp.DstPort)
-	// 		schema.Udp = true
-	// 		schema.Sha256 = fmt.Sprintf("%x", sha256.Sum256(udp.Payload))
-	// 	}
-	// }
+			msg = new(dns.Msg)
+			if err := msg.Unpack(packet.udp.Payload); err != nil {
+				log.Errorf("Could not decode DNS: %v\n", err)
+				stats.PacketErrors++
+				// done <- false
+				return
+			}
+			stats.PacketDns++
 
-	// // This means we did not attempt to parse a DNS payload
-	// if msg == nil {
-	// 	// Let's check if we had any errors decoding any of the packet layers
-	// 	if err := packet.ErrorLayer(); err != nil {
-	// 		log.Debugf("Error decoding some part of the packet:", err)
-	// 		stats.PacketErrors++
-	// 	}
-	// 	// done <- false
-	// 	return
-	// }
+			schema.SourcePort = int(packet.udp.SrcPort)
+			schema.DestinationPort = int(packet.udp.DstPort)
+			schema.Udp = true
+			schema.Sha256 = fmt.Sprintf("%x", sha256.Sum256(packet.udp.Payload))
+		}
+	}
+
+	packetPool.Put(packet)
+
+	// This means we did not attempt to parse a DNS payload
+	if msg == nil {
+		log.Debugf("Error decoding some part of the packet")
+		return
+		// // Let's check if we had any errors decoding any of the packet layers
+		// if err := packet.ErrorLayer(); err != nil {
+		// 	stats.PacketErrors++
+		// }
+		// // done <- false
+		// return
+	}
 
 	// Ignore questions unless flag set
 	if !msg.Response && !DoParseQuestions && !DoParseQuestionsEcs {
