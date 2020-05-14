@@ -104,7 +104,7 @@ func (d DnsSchema) FormatOutput(rr *dns.RR, section int) {
 			return
 		}
 	}
-	go FormatOutputExport(&d)
+	FormatOutputExport(&d)
 }
 
 // FormatOutputExport converts DnsSchema into suitable formats (avro/json) and
